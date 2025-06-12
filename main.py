@@ -1,6 +1,7 @@
 import pygame
 import random
 import os
+import uuid # Pour des IDs uniques pour les agents
 
 # Initialisation de Pygame
 pygame.init()
@@ -14,6 +15,7 @@ SCREEN_TITLE = "Simulation de Vie 3D Démo"
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 RED = (255, 0, 0)
+ORANGE = (255, 140, 0)
 
 # Configuration de l'écran
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -28,10 +30,30 @@ ASSETS_DIR = os.path.join(os.path.dirname(__file__), 'assets')
 # Constante pour la taille de l'image de l'agent
 AGENT_TARGET_HEIGHT_PIXELS = 50 # Définissez ici la hauteur souhaitée en pixels
 
+# Constantes pour la simulation de vie
+GESTATION_DURATION_MS = 30000  # 30 secondes
+MIN_FERTILITY_AGE_MS = 15000   # Devient fertile à 15 secondes
+MAX_AGE_MS = 90000             # Durée de vie de 90 secondes (peut être ajusté)
+REPRODUCTION_COOLDOWN_MS = 10000 # 10 secondes de repos après naissance/tentative
+TARGET_POPULATION = 10
+BASE_CONCEPTION_PROBABILITY = 0.5 # Chance de base de concevoir lors d'une rencontre fertile
+
+ALL_AGENTS = [] # Liste globale pour que les agents puissent interagir
+
+FOOD_RADIUS = 7
+FOOD_ATTRACT_RADIUS = 200  # Distance max d'attraction
+FOOD_LIST = []
+
 class Agent:
     def __init__(self, x, y, default_image_path, boost_image_path):
+        self.id = uuid.uuid4()
         self.x = x
         self.y = y
+
+        # Attributs de cycle de vie
+        self.time_created_ms = pygame.time.get_ticks()
+        self.age_ms = 0
+        self.max_age_ms = MAX_AGE_MS + random.randint(-10000, 10000) # Un peu de variation
         self.normal_speed_range = (-5, 5)
         self.default_image_path = default_image_path
         self.boost_image_path = boost_image_path
@@ -43,7 +65,12 @@ class Agent:
         self.pause_end_time = 0
         self.pause_duration_ms = random.randint(500, 5000) # Durée de la pause entre 0.5 et 5 secondes
         self.time_to_next_pause_check = pygame.time.get_ticks() + random.randint(1000, 3000) # Prochain check dans 1-3 secondes
-        self.pause_probability = 0.2 # 20% de chance de faire une pause lors d'un check_
+        self.pause_probability = 0.2 # 20% de chance de faire une pause lors d'un check
+
+        self.is_fertile = False
+        self.is_pregnant = False
+        self.gestation_start_ms = 0
+        self.last_reproduction_attempt_ms = 0
 
         self.boost_multiplier = 3
 
@@ -125,10 +152,10 @@ class Agent:
 
         # Mouvement aléatoire simple
         self.x += random.randint(self.current_speed_range[0], self.current_speed_range[1])
-        self.y += random.randint(self.current_speed_range[0], self.current_speed_range[1])/4
+        self.y += random.randint(self.current_speed_range[0], self.current_speed_range[1])
 
         # Garder l'agent dans les limites de l'écran en utilisant le rect
-        # Mettre à jour le rectangle basé sur les nouvelles coordonnées
+        # Mettre à jour le rectangle baséon les nouvelles coordonnées
         self.rect.topleft = (self.x, self.y)
 
         # Clamper le rectangle aux limites de l'écran
@@ -181,52 +208,190 @@ class Agent:
             else: # Si pas de pause, replanifier le prochain check
                 self.time_to_next_pause_check = current_time + random.randint(3000, 8000)
 
+    def update_life_cycle(self, current_time, current_population_size):
+        self.age_ms = current_time - self.time_created_ms
+
+        # Vérifier la mort par vieillesse
+        if self.age_ms > self.max_age_ms:
+            print(f"Agent {self.id} est mort de vieillesse.")
+            return {"type": "death", "id": self.id}
+
+        # Mettre à jour la fertilité
+        if not self.is_pregnant and \
+           self.age_ms > MIN_FERTILITY_AGE_MS and \
+           current_time > self.last_reproduction_attempt_ms + REPRODUCTION_COOLDOWN_MS:
+            if not self.is_fertile: # Pour n'afficher le message qu'une fois lors du changement d'état
+                print(f"DEBUG: Agent {self.id} devient fertile. Age: {self.age_ms/1000:.1f}s, Cooldown_OK: {current_time > self.last_reproduction_attempt_ms + REPRODUCTION_COOLDOWN_MS}")
+            self.is_fertile = True
+        else:
+            self.is_fertile = False
+
+        # Gérer la gestation et la naissance
+        if self.is_pregnant and current_time > self.gestation_start_ms + GESTATION_DURATION_MS:
+            self.is_pregnant = False
+            self.is_fertile = False # Entra en cooldown
+            self.last_reproduction_attempt_ms = current_time
+            print(f"Agent {self.id} a donné naissance !")
+            
+            # Position du nouveau-né légèrement décalée
+            birth_x = self.x + random.randint(-20, 20)
+            birth_y = self.y + random.randint(-20, 20)
+            return {"type": "birth", "x": birth_x, "y": birth_y, "parent_id": self.id}
+        
+        return None # Aucun événement de cycle de vie majeur
+
+    def attempt_reproduction(self, partner, current_time, current_population_size):
+        print(f"DEBUG: Tentative repro entre {self.id} (fertile: {self.is_fertile}, preg: {self.is_pregnant}) et {partner.id} (fertile: {partner.is_fertile}, preg: {partner.is_pregnant})")
+        if self.is_fertile and partner.is_fertile and \
+           not self.is_pregnant and not partner.is_pregnant:
+            
+            print(f"DEBUG: Conditions initiales OK pour repro entre {self.id} et {partner.id}")
+            # Ajuster la probabilité de conception en fonction de la population
+            conception_probability = BASE_CONCEPTION_PROBABILITY
+            if current_population_size > TARGET_POPULATION + 2:
+                conception_probability *= 0.3 # Réduit fortement si surpopulation
+            elif current_population_size < TARGET_POPULATION - 2:
+                conception_probability *= 1.5 # Augmente si sous-population
+            conception_probability = min(1.0, conception_probability) # Capper à 100%
+
+            if random.random() < conception_probability:
+                # Un des deux devient gestant (ici, self)
+                self.is_pregnant = True
+                self.gestation_start_ms = current_time
+                self.is_fertile = False # Plus fertile pendant la gestation
+                self.last_reproduction_attempt_ms = current_time
+                partner.last_reproduction_attempt_ms = current_time # Cooldown pour le partenaire aussi
+                print(f"Agent {self.id} est maintenant gestant après rencontre avec {partner.id}. Pop: {current_population_size}, Prob: {conception_probability:.2f}")
+                return True
+            else:
+                print(f"DEBUG: Échec du jet de probabilité pour repro entre {self.id} et {partner.id} (Prob: {conception_probability:.2f})")
+        return False
+
     def update_animation(self):
         if not self.current_frames or len(self.current_frames) <= 1:
             return # Pas d'animation si pas de frames ou une seule frame
-
         current_time = pygame.time.get_ticks()
         if current_time - self.animation_last_update > self.animation_frame_duration:
             self.animation_last_update = current_time
             self.current_frame_index = (self.current_frame_index + 1) % len(self.current_frames)
             self.image = self.current_frames[self.current_frame_index]
 
-# Création d'un agent
-homer_default_image_path = os.path.join(ASSETS_DIR, 'homer.gif')
-homer_boost_image_path = os.path.join(ASSETS_DIR, 'homer_up.gif')
+    def move_towards_food(self, food_list):
+        if not food_list or self.is_paused:
+            return
 
-agent = Agent(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, homer_default_image_path, homer_boost_image_path)
+        # Chercher la nourriture la plus proche
+        closest_food = None
+        min_dist = float('inf')
+        for food in food_list:
+            dx = food["x"] - self.x
+            dy = food["y"] - self.y
+            dist = (dx**2 + dy**2) ** 0.5
+            if dist < min_dist and dist < FOOD_ATTRACT_RADIUS:
+                min_dist = dist
+                closest_food = food
+
+        if closest_food:
+            # Déplacement simple vers la nourriture
+            dx = closest_food["x"] - self.x
+            dy = closest_food["y"] - self.y
+            dist = (dx**2 + dy**2) ** 0.5
+            if dist > 1:
+                speed = max(abs(self.current_speed_range[0]), abs(self.current_speed_range[1]))
+                self.x += int(round(dx / dist * speed))
+                self.y += int(round(dy / dist * speed))
+                self.rect.topleft = (self.x, self.y)
+                self.rect.clamp_ip(screen.get_rect())
+                self.x = self.rect.x
+                self.y = self.rect.y
+
+# Création d'un agent
+DEFAULT_IMG_PATH = os.path.join(ASSETS_DIR, 'homer.gif')
+BOOST_IMG_PATH = os.path.join(ASSETS_DIR, 'homer_up.gif')
+
+# Initialiser la population
+for _ in range(2): # Commencer avec 2 agents
+    start_x = random.randint(50, SCREEN_WIDTH - 50)
+    start_y = random.randint(50, SCREEN_HEIGHT - 50)
+    agent = Agent(start_x, start_y, DEFAULT_IMG_PATH, BOOST_IMG_PATH)
+    ALL_AGENTS.append(agent)
+
+# Initialiser la liste des événements de cycle de vie
+life_cycle_events = []
+agents_to_remove = []
 
 # Boucle principale de la simulation
 running = True
-counter = 0
 while running:
+    current_time_ticks = pygame.time.get_ticks()
+    
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
         if event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1: # Clic gauche
-                if agent.rect.collidepoint(event.pos):
-                    agent.activate_boost()
+            if event.button == 1:  # Clic gauche
+                clicked_on_agent = False
+                for agent_obj in ALL_AGENTS: # Renommer la variable locale pour éviter la confusion
+                    if agent_obj.rect.collidepoint(event.pos):
+                        agent_obj.activate_boost()
+                        clicked_on_agent = True
+                        break  # Un seul boost par clic
+                if not clicked_on_agent:
+                    # Ajout de nourriture si on ne clique pas sur un agent
+                    FOOD_LIST.append({"x": event.pos[0], "y": event.pos[1]})
 
-    # Mettre à jour l'état de la simulation
-    agent.update_boost_status()
-    agent.update_animation() # Mettre à jour l'animation avant de vérifier la pause ou de bouger
-    agent.update_pause_status()
-    if not counter % 10:  # Toutes les 10 itérations, l'agent bouge
-        agent.move_randomly()
+    new_life_cycle_events = [] # Utiliser une nouvelle liste pour les événements de ce tour
+    # Traiter les événements de cycle de vie (naissances, morts)
+    for event_data in life_cycle_events:
+        if event_data["type"] == "birth":
+            new_agent = Agent(event_data["x"], event_data["y"], DEFAULT_IMG_PATH, BOOST_IMG_PATH)
+            ALL_AGENTS.append(new_agent)
+            print(f"Nouveau né ! Population: {len(ALL_AGENTS)}")
+        elif event_data["type"] == "death":
+            agents_to_remove.append(event_data["id"])
 
+    life_cycle_events = new_life_cycle_events # Mettre à jour la liste principale
+
+    ALL_AGENTS = [agent for agent in ALL_AGENTS if agent.id not in agents_to_remove]
+    agents_to_remove.clear() # Vider pour le prochain tour
     # Dessiner
     screen.fill(BLACK)  # Fond noir
-    agent.draw(screen)
+    # Dessiner la nourriture
+    for food in FOOD_LIST:
+        pygame.draw.circle(screen, ORANGE, (food["x"], food["y"]), FOOD_RADIUS)
+    for agent in ALL_AGENTS:
+        agent.draw(screen)
+
+    for agent in ALL_AGENTS:
+        agent.update_boost_status()
+        agent.update_animation()
+        agent.update_pause_status()
+        if FOOD_LIST:
+            agent.move_towards_food(FOOD_LIST)
+        else:
+            agent.move_randomly()
+        event = agent.update_life_cycle(current_time_ticks, len(ALL_AGENTS))
+        if event:
+            life_cycle_events.append(event)
+
+    # Vérifier la consommation de nourriture
+    food_consumed_indices = []
+    for agent in ALL_AGENTS:
+        for i, food_item in enumerate(FOOD_LIST):
+            if i in food_consumed_indices: # Déjà marquée pour suppression
+                continue
+            food_rect = pygame.Rect(food_item["x"] - FOOD_RADIUS, food_item["y"] - FOOD_RADIUS, FOOD_RADIUS * 2, FOOD_RADIUS * 2)
+            if agent.rect.colliderect(food_rect):
+                food_consumed_indices.append(i)
+                # Ici, on pourrait ajouter un effet à l'agent (ex: gain d'énergie)
+    # Supprimer la nourriture consommée (en ordre inverse pour éviter les problèmes d'indice)
+    for i in sorted(food_consumed_indices, reverse=True):
+        del FOOD_LIST[i]
 
     # Mettre à jour l'affichage
     pygame.display.flip()
 
     # Contrôler la vitesse de la simulation (FPS)
     clock.tick(30)
-
-    # Incrementer le compteur
-    counter += 1
 
 pygame.quit()
