@@ -44,6 +44,9 @@ FOOD_RADIUS = 7
 FOOD_ATTRACT_RADIUS = 200  # Distance max d'attraction
 FOOD_LIST = []
 
+FOOD_SPAWN_INTERVAL_MS = 30000 # 30 secondes
+last_food_spawn_time_ms = 0
+
 class Agent:
     def __init__(self, x, y, default_image_path, boost_image_path):
         self.id = uuid.uuid4()
@@ -221,7 +224,7 @@ class Agent:
            self.age_ms > MIN_FERTILITY_AGE_MS and \
            current_time > self.last_reproduction_attempt_ms + REPRODUCTION_COOLDOWN_MS:
             if not self.is_fertile: # Pour n'afficher le message qu'une fois lors du changement d'état
-                print(f"DEBUG: Agent {self.id} devient fertile. Age: {self.age_ms/1000:.1f}s, Cooldown_OK: {current_time > self.last_reproduction_attempt_ms + REPRODUCTION_COOLDOWN_MS}")
+                # print(f"DEBUG: Agent {self.id} devient fertile. Age: {self.age_ms/1000:.1f}s, Cooldown_OK: {current_time > self.last_reproduction_attempt_ms + REPRODUCTION_COOLDOWN_MS}")
             self.is_fertile = True
         else:
             self.is_fertile = False
@@ -241,11 +244,11 @@ class Agent:
         return None # Aucun événement de cycle de vie majeur
 
     def attempt_reproduction(self, partner, current_time, current_population_size):
-        print(f"DEBUG: Tentative repro entre {self.id} (fertile: {self.is_fertile}, preg: {self.is_pregnant}) et {partner.id} (fertile: {partner.is_fertile}, preg: {partner.is_pregnant})")
+        # print(f"DEBUG: Tentative repro entre {self.id} (fertile: {self.is_fertile}, preg: {self.is_pregnant}) et {partner.id} (fertile: {partner.is_fertile}, preg: {partner.is_pregnant})")
         if self.is_fertile and partner.is_fertile and \
            not self.is_pregnant and not partner.is_pregnant:
             
-            print(f"DEBUG: Conditions initiales OK pour repro entre {self.id} et {partner.id}")
+            # print(f"DEBUG: Conditions initiales OK pour repro entre {self.id} et {partner.id}")
             # Ajuster la probabilité de conception en fonction de la population
             conception_probability = BASE_CONCEPTION_PROBABILITY
             if current_population_size > TARGET_POPULATION + 2:
@@ -264,7 +267,7 @@ class Agent:
                 print(f"Agent {self.id} est maintenant gestant après rencontre avec {partner.id}. Pop: {current_population_size}, Prob: {conception_probability:.2f}")
                 return True
             else:
-                print(f"DEBUG: Échec du jet de probabilité pour repro entre {self.id} et {partner.id} (Prob: {conception_probability:.2f})")
+                # print(f"DEBUG: Échec du jet de probabilité pour repro entre {self.id} et {partner.id} (Prob: {conception_probability:.2f})")
         return False
 
     def update_animation(self):
@@ -316,22 +319,20 @@ for _ in range(2): # Commencer avec 2 agents
     agent = Agent(start_x, start_y, DEFAULT_IMG_PATH, BOOST_IMG_PATH)
     ALL_AGENTS.append(agent)
 
-# Initialiser la liste des événements de cycle de vie
-life_cycle_events = []
-agents_to_remove = []
-
 # Boucle principale de la simulation
 running = True
 while running:
+    global last_food_spawn_time_ms # Rendre la variable globale accessible
     current_time_ticks = pygame.time.get_ticks()
     
     for event in pygame.event.get():
+        # Renommé 'event' en 'pygame_event' pour éviter confusion avec les événements de simulation
         if event.type == pygame.QUIT:
             running = False
         if event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Clic gauche
                 clicked_on_agent = False
-                for agent_obj in ALL_AGENTS: # Renommer la variable locale pour éviter la confusion
+                for agent_obj in ALL_AGENTS:
                     if agent_obj.rect.collidepoint(event.pos):
                         agent_obj.activate_boost()
                         clicked_on_agent = True
@@ -340,39 +341,76 @@ while running:
                     # Ajout de nourriture si on ne clique pas sur un agent
                     FOOD_LIST.append({"x": event.pos[0], "y": event.pos[1]})
 
-    new_life_cycle_events = [] # Utiliser une nouvelle liste pour les événements de ce tour
-    # Traiter les événements de cycle de vie (naissances, morts)
-    for event_data in life_cycle_events:
-        if event_data["type"] == "birth":
-            new_agent = Agent(event_data["x"], event_data["y"], DEFAULT_IMG_PATH, BOOST_IMG_PATH)
-            ALL_AGENTS.append(new_agent)
-            print(f"Nouveau né ! Population: {len(ALL_AGENTS)}")
-        elif event_data["type"] == "death":
-            agents_to_remove.append(event_data["id"])
+    current_tick_simulation_events = []
+    agents_to_remove_ids_this_tick = []
+    new_agents_born_this_tick = []
 
-    life_cycle_events = new_life_cycle_events # Mettre à jour la liste principale
-
-    ALL_AGENTS = [agent for agent in ALL_AGENTS if agent.id not in agents_to_remove]
-    agents_to_remove.clear() # Vider pour le prochain tour
-    # Dessiner
-    screen.fill(BLACK)  # Fond noir
-    # Dessiner la nourriture
-    for food in FOOD_LIST:
-        pygame.draw.circle(screen, ORANGE, (food["x"], food["y"]), FOOD_RADIUS)
-    for agent in ALL_AGENTS:
-        agent.draw(screen)
-
+    # Mettre à jour chaque agent (mouvement, états, cycle de vie -> naissances/morts)
     for agent in ALL_AGENTS:
         agent.update_boost_status()
         agent.update_animation()
         agent.update_pause_status()
+
         if FOOD_LIST:
             agent.move_towards_food(FOOD_LIST)
         else:
             agent.move_randomly()
-        event = agent.update_life_cycle(current_time_ticks, len(ALL_AGENTS))
-        if event:
-            life_cycle_events.append(event)
+        
+        life_cycle_event = agent.update_life_cycle(current_time_ticks, len(ALL_AGENTS))
+        if life_cycle_event:
+            current_tick_simulation_events.append(life_cycle_event)
+
+    # Générer les événements de tentative de reproduction à partir des collisions
+    for i in range(len(ALL_AGENTS)):
+        for j in range(i + 1, len(ALL_AGENTS)):
+            agent1 = ALL_AGENTS[i]
+            agent2 = ALL_AGENTS[j]
+
+            # S'assurer que les agents ne sont pas déjà marqués pour suppression ce tick
+            if agent1.id in agents_to_remove_ids_this_tick or agent2.id in agents_to_remove_ids_this_tick:
+                continue
+
+            if agent1.rect.colliderect(agent2.rect):
+                # print(f"DEBUG: Collision détectée entre {agent1.id} (fertile: {agent1.is_fertile}) et {agent2.id} (fertile: {agent2.is_fertile})")
+                current_tick_simulation_events.append({
+                    "type": "reproduction_check",
+                    "agent1_id": agent1.id,
+                    "agent2_id": agent2.id
+                })
+
+    # Traiter tous les événements de simulation accumulés pour ce tick
+    for event_data in current_tick_simulation_events:
+        if event_data["type"] == "birth":
+            new_born_agent = Agent(event_data["x"], event_data["y"], DEFAULT_IMG_PATH, BOOST_IMG_PATH)
+            new_agents_born_this_tick.append(new_born_agent)
+        elif event_data["type"] == "death":
+            agents_to_remove_ids_this_tick.append(event_data["id"])
+        elif event_data["type"] == "reproduction_check":
+            agent1 = next((a for a in ALL_AGENTS if a.id == event_data["agent1_id"] and a.id not in agents_to_remove_ids_this_tick), None)
+            agent2 = next((a for a in ALL_AGENTS if a.id == event_data["agent2_id"] and a.id not in agents_to_remove_ids_this_tick), None)
+            if agent1 and agent2: # S'assurer que les deux agents existent toujours
+                # La méthode attempt_reproduction gère les conditions internes (fertilité, gestation, cooldown)
+                # et modifie directement l'état de l'agent (is_pregnant).
+                # Les messages de debug dans attempt_reproduction sont toujours actifs.
+                current_pop_approx = len(ALL_AGENTS) + len(new_agents_born_this_tick) - len(agents_to_remove_ids_this_tick)
+                agent1.attempt_reproduction(agent2, current_time_ticks, current_pop_approx)
+
+    # Appliquer les changements à la liste principale des agents
+    ALL_AGENTS.extend(new_agents_born_this_tick)
+    ALL_AGENTS = [agent for agent in ALL_AGENTS if agent.id not in agents_to_remove_ids_this_tick]
+
+    if new_agents_born_this_tick:
+        print(f"Nés ce tour: {len(new_agents_born_this_tick)}. Population actuelle: {len(ALL_AGENTS)}")
+    if agents_to_remove_ids_this_tick:
+        print(f"Morts ce tour: {len(agents_to_remove_ids_this_tick)}. Population actuelle: {len(ALL_AGENTS)}")
+
+    # Spawn de nourriture aléatoire
+    if current_time_ticks - last_food_spawn_time_ms > FOOD_SPAWN_INTERVAL_MS:
+        food_x = random.randint(FOOD_RADIUS, SCREEN_WIDTH - FOOD_RADIUS)
+        food_y = random.randint(FOOD_RADIUS, SCREEN_HEIGHT - FOOD_RADIUS)
+        FOOD_LIST.append({"x": food_x, "y": food_y})
+        last_food_spawn_time_ms = current_time_ticks
+        print(f"Nourriture apparue à ({food_x}, {food_y})")
 
     # Vérifier la consommation de nourriture
     food_consumed_indices = []
@@ -387,6 +425,13 @@ while running:
     # Supprimer la nourriture consommée (en ordre inverse pour éviter les problèmes d'indice)
     for i in sorted(food_consumed_indices, reverse=True):
         del FOOD_LIST[i]
+
+    # Dessiner
+    screen.fill(BLACK)  # Fond noir
+    for food in FOOD_LIST: # Dessiner la nourriture
+        pygame.draw.circle(screen, ORANGE, (food["x"], food["y"]), FOOD_RADIUS)
+    for agent in ALL_AGENTS: # Dessiner les agents
+        agent.draw(screen)
 
     # Mettre à jour l'affichage
     pygame.display.flip()
