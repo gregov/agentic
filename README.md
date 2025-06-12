@@ -7,8 +7,10 @@ Ce projet est une démonstration simple d'une simulation de vie, codée en Pytho
 ## Fonctionnalités Principales
 
 *   Visualisation d'un environnement 2D simple.
-*   Un agent (un carré rouge) se déplaçant de manière aléatoire.
-*   Fenêtre d'application gérée par `pygame`.
+*   Un agent, représenté par Homer Simpson, se déplaçant de manière aléatoire.
+*   Chargement et redimensionnement d'une image pour l'agent depuis un dossier `assets` (hauteur définie en pixels).
+*   Utilisation d'une image différente (`homer_up.gif`) lorsque l'agent est en mode "boost".
+*   Fenêtre d'application gérée par `pygame`. Les images utilisées sont `homer.gif` et `homer_up.gif`.
 
 ## Prérequis Techniques
 
@@ -16,6 +18,8 @@ Ce projet est une démonstration simple d'une simulation de vie, codée en Pytho
 *   Bibliothèques Python :
     *   `pygame` (pour le rendu graphique et la gestion des fenêtres).
 *   Les dépendances sont listées dans `requirements.txt`.
+*   Une image nommée `homer.png` dans un dossier `assets/` à la racine du projet.
+*   Des images nommées `homer.gif` et `homer_up.gif` dans un dossier `assets/` à la racine du projet.
 
 ## Installation
 
