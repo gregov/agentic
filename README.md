@@ -2,23 +2,20 @@
 
 ## Description
 
-Ce projet est une démonstration d'une simulation de vie en 3D, entièrement codée en Python. Il a pour but de présenter les mécanismes de base de la création d'un environnement tridimensionnel interactif peuplé d'entités autonomes.
+Ce projet est une démonstration simple d'une simulation de vie, codée en Python avec la bibliothèque `pygame`. Il vise à illustrer les concepts de base d'agents se déplaçant dans un environnement 2D (simulant un espace pour cette démo).
 
 ## Fonctionnalités Principales
 
-*   Visualisation d'un environnement 3D simple.
-*   Agents (créatures/entités) avec des comportements basiques (ex: déplacement aléatoire, recherche de nourriture).
-*   Interaction limitée entre les agents et/ou avec l'environnement.
-*   (Optionnel) Interface utilisateur simple pour observer ou interagir avec la simulation.
+*   Visualisation d'un environnement 2D simple.
+*   Un agent (un carré rouge) se déplaçant de manière aléatoire.
+*   Fenêtre d'application gérée par `pygame`.
 
 ## Prérequis Techniques
 
 *   Python 3.8 ou supérieur.
 *   Bibliothèques Python :
-    *   `pygame` ou `pyglet` ou `panda3d` (pour le rendu 3D et la gestion des fenêtres).
-    *   `numpy` (pour les calculs mathématiques et vectoriels).
-    *   (Autres bibliothèques spécifiques à votre implémentation).
-*   Il est fortement recommandé de lister toutes les dépendances dans un fichier `requirements.txt`.
+    *   `pygame` (pour le rendu graphique et la gestion des fenêtres).
+*   Les dépendances sont listées dans `requirements.txt`.
 
 ## Installation
 
