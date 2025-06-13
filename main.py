@@ -16,6 +16,8 @@ BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 RED = (255, 0, 0)
 ORANGE = (255, 140, 0)
+BROWN = (139, 69, 19)
+DARK_RED = (139, 0, 0)
 
 # Configuration de l'écran
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -45,7 +47,6 @@ FOOD_ATTRACT_RADIUS = 200  # Distance max d'attraction
 FOOD_LIST = []
 
 FOOD_SPAWN_INTERVAL_MS = 30000 # 30 secondes
-last_food_spawn_time_ms = 0
 
 class Agent:
     def __init__(self, x, y, default_image_path, boost_image_path):
@@ -225,7 +226,7 @@ class Agent:
            current_time > self.last_reproduction_attempt_ms + REPRODUCTION_COOLDOWN_MS:
             if not self.is_fertile: # Pour n'afficher le message qu'une fois lors du changement d'état
                 # print(f"DEBUG: Agent {self.id} devient fertile. Age: {self.age_ms/1000:.1f}s, Cooldown_OK: {current_time > self.last_reproduction_attempt_ms + REPRODUCTION_COOLDOWN_MS}")
-            self.is_fertile = True
+                self.is_fertile = True
         else:
             self.is_fertile = False
 
@@ -266,7 +267,7 @@ class Agent:
                 partner.last_reproduction_attempt_ms = current_time # Cooldown pour le partenaire aussi
                 print(f"Agent {self.id} est maintenant gestant après rencontre avec {partner.id}. Pop: {current_population_size}, Prob: {conception_probability:.2f}")
                 return True
-            else:
+            # else:
                 # print(f"DEBUG: Échec du jet de probabilité pour repro entre {self.id} et {partner.id} (Prob: {conception_probability:.2f})")
         return False
 
@@ -308,6 +309,21 @@ class Agent:
                 self.x = self.rect.x
                 self.y = self.rect.y
 
+def draw_house(surface, x, y, width=50, height=40, roof_height=25):
+    """Dessine une maison simple à la position (x, y)."""
+    # Corps de la maison (rectangle)
+    body_rect = pygame.Rect(x, y + roof_height, width, height)
+    pygame.draw.rect(surface, BROWN, body_rect)
+
+    # Toit de la maison (triangle)
+    roof_points = [
+        (x, y + roof_height),             # Point gauche du toit
+        (x + width / 2, y),               # Sommet du toit
+        (x + width, y + roof_height)      # Point droit du toit
+    ]
+    pygame.draw.polygon(surface, DARK_RED, roof_points)
+
+
 # Création d'un agent
 DEFAULT_IMG_PATH = os.path.join(ASSETS_DIR, 'homer.gif')
 BOOST_IMG_PATH = os.path.join(ASSETS_DIR, 'homer_up.gif')
@@ -319,10 +335,10 @@ for _ in range(2): # Commencer avec 2 agents
     agent = Agent(start_x, start_y, DEFAULT_IMG_PATH, BOOST_IMG_PATH)
     ALL_AGENTS.append(agent)
 
+last_food_spawn_time_ms = 0
 # Boucle principale de la simulation
 running = True
 while running:
-    global last_food_spawn_time_ms # Rendre la variable globale accessible
     current_time_ticks = pygame.time.get_ticks()
     
     for event in pygame.event.get():
@@ -404,6 +420,11 @@ while running:
     if agents_to_remove_ids_this_tick:
         print(f"Morts ce tour: {len(agents_to_remove_ids_this_tick)}. Population actuelle: {len(ALL_AGENTS)}")
 
+    # Vérifier si tous les agents sont morts
+    if not ALL_AGENTS:
+        print("Tous les agents sont morts. Fin de la simulation.")
+        running = False # Arrêter la boucle principale du jeu
+
     # Spawn de nourriture aléatoire
     if current_time_ticks - last_food_spawn_time_ms > FOOD_SPAWN_INTERVAL_MS:
         food_x = random.randint(FOOD_RADIUS, SCREEN_WIDTH - FOOD_RADIUS)
@@ -421,13 +442,19 @@ while running:
             food_rect = pygame.Rect(food_item["x"] - FOOD_RADIUS, food_item["y"] - FOOD_RADIUS, FOOD_RADIUS * 2, FOOD_RADIUS * 2)
             if agent.rect.colliderect(food_rect):
                 food_consumed_indices.append(i)
-                # Ici, on pourrait ajouter un effet à l'agent (ex: gain d'énergie)
+                agent.activate_boost() # Activer le boost lorsque la nourriture est consommée
+                print(f"Agent {agent.id} a mangé et a reçu un boost!")
     # Supprimer la nourriture consommée (en ordre inverse pour éviter les problèmes d'indice)
     for i in sorted(food_consumed_indices, reverse=True):
         del FOOD_LIST[i]
 
     # Dessiner
     screen.fill(BLACK)  # Fond noir
+
+    # Dessiner quelques maisons en haut à gauche
+    draw_house(screen, 20, 20)
+    draw_house(screen, 90, 20, width=60, height=50, roof_height=30) # Une maison un peu plus grande
+
     for food in FOOD_LIST: # Dessiner la nourriture
         pygame.draw.circle(screen, ORANGE, (food["x"], food["y"]), FOOD_RADIUS)
     for agent in ALL_AGENTS: # Dessiner les agents
